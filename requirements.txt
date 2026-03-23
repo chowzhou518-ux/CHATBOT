@@ -1,0 +1,40 @@
+# Core Framework
+langchain>=0.1.0
+langchain-community>=0.0.10
+langgraph>=0.0.20
+
+# LLM Providers
+openai>=1.0.0  # For DeepSeek and OpenAI
+anthropic>=0.18.0  # Optional: for Claude
+
+# Vector Database
+pymilvus>=2.3.0
+milvus>=2.3.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# Configuration & Environment
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Guardrails & Security
+presidio-analyzer>=2.2.0
+presidio-anonymizer>=2.2.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+
+# Code Quality
+ruff>=0.1.0
+mypy>=1.5.0
+
+# CLI & Optional UI
+rich>=13.0.0
+
+# Utilities
+httpx>=0.25.0
