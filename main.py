@@ -20,6 +20,7 @@ except ImportError:
 
 from src.config.settings import get_settings
 from src.chatbot.agent import get_simple_chatbot
+from src.chatbot.agent_langgraph import get_chatbot_agent as get_langgraph_agent
 from src.data.dynamic_data import get_db_manager
 from src.core.vector_store import initialize_vector_store
 
@@ -27,7 +28,7 @@ from src.core.vector_store import initialize_vector_store
 class ChatbotCLI:
     """Command-line interface for the parking chatbot."""
 
-    def __init__(self, use_rich: bool = True):
+    def __init__(self, use_rich: bool = True, use_langgraph: bool = False):
         """Initialize CLI."""
         self.use_rich = use_rich and RICH_AVAILABLE
         if self.use_rich:
@@ -35,7 +36,13 @@ class ChatbotCLI:
         else:
             self.console = None
 
-        self.chatbot = get_simple_chatbot()
+        self.use_langgraph = use_langgraph
+        if use_langgraph:
+            self.chatbot = get_langgraph_agent()
+            self.is_agent = True
+        else:
+            self.chatbot = get_simple_chatbot()
+            self.is_agent = False
         self.running = False
 
     def print_welcome(self) -> None:
@@ -181,7 +188,17 @@ Type `help` for commands or `quit` to exit.
                 # Get chatbot response
                 self.print_user_message(user_input)
 
-                response = self.chatbot.chat(user_input)
+                if self.is_agent:
+                    # LangGraph agent returns dict with 'response' key
+                    result = self.chatbot.process_message(user_input)
+                    response = result.get("response", "I apologize, but I couldn't process that.")
+                    if result.get("error"):
+                        self.print_message(response, "red")
+                        continue
+                else:
+                    # Simple chatbot returns string directly
+                    response = self.chatbot.chat(user_input)
+
                 self.print_message(response, "blue")
 
             except KeyboardInterrupt:
@@ -214,6 +231,11 @@ def main():
         action="store_true",
         help="Run in test mode"
     )
+    parser.add_argument(
+        "--langgraph",
+        action="store_true",
+        help="Use LangGraph agent (LangChain 1.0 implementation)"
+    )
 
     args = parser.parse_args()
 
@@ -239,7 +261,7 @@ def main():
             print("Continuing with mock RAG engine...")
 
         # Start CLI
-        cli = ChatbotCLI(use_rich=not args.no_rich)
+        cli = ChatbotCLI(use_rich=not args.no_rich, use_langgraph=args.langgraph)
         cli.run()
 
     except Exception as e:
