@@ -162,6 +162,7 @@ class ReservationManager:
         self,
         reservation_id: str,
         admin_note: Optional[str] = None,
+        save_to_file: bool = True,
     ) -> Optional[ReservationRequest]:
         """
         Approve a reservation.
@@ -169,15 +170,48 @@ class ReservationManager:
         Args:
             reservation_id: The reservation ID
             admin_note: Optional note from admin
+            save_to_file: Whether to save to MCP server file storage
 
         Returns:
             Updated ReservationRequest or None if not found
         """
-        return self.update_reservation_status(
+        reservation = self.update_reservation_status(
             reservation_id,
             ReservationStatus.APPROVED,
             admin_note,
         )
+
+        # Save to MCP server file storage if requested and successful
+        if reservation and save_to_file:
+            try:
+                from src.mcp.server import save_approved_reservation
+
+                mcp_server_url = "http://localhost:8001"
+                success = save_approved_reservation(
+                    name=reservation.user_name,
+                    surname=reservation.user_surname,
+                    car_number=reservation.car_number,
+                    start_time=reservation.start_time,
+                    end_time=reservation.end_time,
+                    reservation_id=reservation.reservation_id,
+                    space_type=reservation.space_type,
+                    contact_info=reservation.contact_info,
+                    mcp_server_url=mcp_server_url,
+                )
+
+                if success:
+                    print(f"\n✅ Reservation {reservation_id} saved to file storage")
+                else:
+                    print(f"\n⚠️  Warning: Could not save to MCP server file storage")
+
+            except ImportError:
+                # MCP server not available, continue without saving
+                print(f"\n⚠️  MCP server module not available, skipping file save")
+            except Exception as e:
+                # Log error but don't fail the approval
+                print(f"\n⚠️  Error saving to MCP server: {str(e)}")
+
+        return reservation
 
     def reject_reservation(
         self,

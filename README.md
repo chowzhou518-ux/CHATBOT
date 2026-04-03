@@ -25,6 +25,15 @@ A RAG-based (Retrieval-Augmented Generation) intelligent chatbot for parking spa
 - **Request Expiration**: Automatic expiration of pending requests after 24 hours (configurable)
 - **User Notifications**: Users receive clear feedback about their reservation status
 
+### 🆕 Stage 3: MCP Server for Persistent Storage
+- **MCP Protocol Implementation**: FastAPI-based MCP server for managing approved reservations
+- **File Storage**: Automatically writes approved reservations to text file in format: `Name | Car Number | Reservation Period | Approval Time`
+- **Security Features**: API key authentication, input validation, file size limits
+- **Backup System**: Automatic backup of reservation files before modifications
+- **Search Functionality**: Query reservations by name or car number
+- **Statistics API**: Get file statistics and reservation counts
+- **Integration**: Automatically called when administrator approves a reservation
+
 ## Architecture
 
 ```
@@ -93,6 +102,18 @@ chatbot/
 │   ├── guards/           # PII detection and guardrails
 │   ├── chatbot/          # LangGraph agent and tools
 │   │   ├── agent.py              # Main chatbot agent
+│   │   ├── tools.py              # Parking tools
+│   │   ├── admin_agent.py        # 🆕 Administrator agent
+│   │   ├── channels.py           # 🆕 Communication channel handlers
+│   │   └── escalation.py         # 🆕 Escalation manager
+│   ├── api/              # 🆕 REST API server
+│   │   └── server.py             # FastAPI endpoints
+│   ├── mcp/              # 🆕 MCP Server
+│   │   └── server.py             # MCP server for file storage
+│   └── evaluation/       # Metrics and performance testing
+├── tests/                # Comprehensive test suite
+│   ├── test_admin_system.py      # 🆕 Admin system tests
+│   └── test_mcp_server.py        # 🆕 MCP server tests
 │   │   ├── tools.py              # Parking tools
 │   │   ├── admin_agent.py        # 🆕 Administrator agent
 │   │   ├── channels.py           # 🆕 Communication channel handlers
@@ -225,6 +246,45 @@ The API server provides:
 - `POST /api/cleanup` - Clean up expired reservations
 
 API documentation: `http://localhost:8000/docs`
+
+#### MCP Server
+
+For persistent storage of approved reservations:
+
+```bash
+# Start the MCP server (runs on port 8001)
+python -m src.mcp.server
+```
+
+The MCP server provides:
+- `POST /mcp/tool/write_reservation` - Write approved reservation to file
+- `POST /mcp/tool/read_reservations` - Read all or search reservations
+- `GET /mcp/tool/storage_stats` - Get file statistics
+- `DELETE /mcp/tool/all_reservations` - Delete all reservations (with backup)
+- `POST /mcp/execute` - Generic tool execution endpoint
+
+**File Format:**
+```
+Name | Car Number | Reservation Period | Approval Time
+```
+
+**Example:**
+```
+John Doe | ABC-123 | 2026-04-10 10:00 - 2026-04-10 12:00 | 2026-04-10 09:15:30
+Jane Smith | XYZ-789 | 2026-04-10 14:00 - 2026-04-10 16:00 | 2026-04-10 13:20:45
+```
+
+**Security:**
+- API key authentication (set via `MCP_API_KEY` environment variable)
+- Input validation and sanitization
+- File size limits (configurable via `MAX_FILE_SIZE`)
+- Automatic backup before modifications
+
+**Integration:**
+The MCP server is automatically called when an administrator approves a reservation through:
+- Admin CLI (`admin_cli.py`)
+- REST API (`/api/admin/respond`)
+- Direct function call (`save_approved_reservation()`)
 
 ## API Reference
 
@@ -386,6 +446,13 @@ python -m src.evaluation.performance
 | `SMTP_PASSWORD` | SMTP password | - |
 | `ADMIN_API_ENDPOINT` | Webhook endpoint for REST API | - |
 | `ADMIN_API_KEY` | API key for authentication | - |
+| **MCP Server** | | |
+| `MCP_API_KEY` | MCP server API key for authentication | - |
+| `RESERVATION_FILE` | Path to approved reservations file | ./data/approved_reservations.txt |
+| `BACKUP_DIR` | Directory for backup files | ./data/backups |
+| `MAX_FILE_SIZE` | Maximum file size in bytes | 10485760 (10MB) |
+| `ENABLE_BACKUP` | Enable automatic backups | true |
+| `REQUIRE_AUTH` | Require API key authentication | true |
 
 ### Customization
 
