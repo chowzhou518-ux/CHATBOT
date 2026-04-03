@@ -5,6 +5,14 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
+# SQLAlchemy imports for database models
+try:
+    from sqlalchemy.orm import declarative_base
+    Base = declarative_base()
+except ImportError:
+    from sqlalchemy.ext.declarative import declarative_base
+    Base = declarative_base()
+
 
 class ParkingType(str, Enum):
     """Types of parking spaces."""

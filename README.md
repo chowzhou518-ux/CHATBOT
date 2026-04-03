@@ -16,6 +16,15 @@ A RAG-based (Retrieval-Augmented Generation) intelligent chatbot for parking spa
 - **Multi-turn Conversations**: Context-aware conversations with history management
 - **Comprehensive Evaluation**: Performance metrics (Recall@K, Precision, NDCG) and latency tracking
 
+### 🆕 Stage 2: Human-in-the-Loop Administrator System
+- **Admin Approval Workflow**: Reservation requests are automatically escalated to human administrators for approval
+- **Multi-Channel Notifications**: Support for email, REST API/webhook, and mock channels (for testing)
+- **Administrator CLI**: Interactive command-line interface for managing reservations
+- **Status Tracking**: Real-time status updates (pending, approved, rejected, expired)
+- **REST API Server**: FastAPI-based server for receiving admin responses and webhook notifications
+- **Request Expiration**: Automatic expiration of pending requests after 24 hours (configurable)
+- **User Notifications**: Users receive clear feedback about their reservation status
+
 ## Architecture
 
 ```
@@ -25,11 +34,15 @@ A RAG-based (Retrieval-Augmented Generation) intelligent chatbot for parking spa
 └────────────────────────┬────────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────────┐
-│                    Chatbot Agent (LangGraph)                 │
+│              Chatbot Agent & Escalation System              │
 │  ┌─────────────┐ ┌──────────────┐ ┌──────────────────────┐ │
-│  │ Intent      │ │ Tool         │ │ State                │ │
-│  │ Classifier  │ │ Execution    │ │ Management           │ │
-│  └─────────────┘ └──────────────┘ └──────────────────────┘ │
+│  │ Intent      │ │ Tool         │ │ Escalation Manager   │ │
+│  │ Classifier  │ │ Execution    │ │ • Request Creation   │ │
+│  └─────────────┘ └──────────────┘ │ • Channel Handlers   │ │
+│  ┌─────────────┐ ┌──────────────┐ │ • Status Tracking    │ │
+│  │ Admin       │ │ Notification │ └──────────────────────┘ │
+│  │ Agent       │ │ System       │                            │
+│  └─────────────┘ └──────────────┘                            │
 └────────────────────────┬────────────────────────────────────┘
                          │
          ┌───────────────┼───────────────┐
@@ -40,8 +53,8 @@ A RAG-based (Retrieval-Augmented Generation) intelligent chatbot for parking spa
 │  │ Vector   │   │ │ PII    │ │  • Availability │
 │  │ Store    │   │ │ Filter │ │  • Pricing      │
 │  │ (Milvus) │   │ │        │ │  • Reservations │
-│  └──────────┘   │ │        │ └─────────────────┘
-│  ┌──────────┐   │ │ Topic  │
+│  └──────────┘   │ │        │ │  • Requests     │
+│  ┌──────────┐   │ │ Topic  │ └─────────────────┘
 │  │ LLM      │   │ │ Filter │
 │  │(DeepSeek)│   │ │        │
 │  └──────────┘   │ └────────┘
@@ -54,6 +67,14 @@ A RAG-based (Retrieval-Augmented Generation) intelligent chatbot for parking spa
 │  • Knowledge    │
 │    Base         │
 └─────────────────┘
+
+         ▼
+┌──────────────────────────────────────────────────┐
+│          Administrator Interface                  │
+│  ┌──────────────┐ ┌─────────────┐ ┌───────────┐ │
+│  │ Admin CLI    │ │ REST API    │ │ Email/Webhook│ │
+│  └──────────────┘ └─────────────┘ └───────────┘ │
+└──────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
@@ -64,14 +85,28 @@ chatbot/
 │   ├── config/           # Configuration and settings
 │   ├── core/             # RAG engine, vector store, LLM handler
 │   ├── data/             # Data models, schemas, database operations
+│   │   ├── schemas.py            # Pydantic models
+│   │   ├── static_data.py        # Knowledge base loader
+│   │   ├── dynamic_data.py       # SQLite operations
+│   │   ├── reservation_state.py  # 🆕 Reservation state models
+│   │   └── reservation_manager.py # 🆕 Reservation CRUD operations
 │   ├── guards/           # PII detection and guardrails
 │   ├── chatbot/          # LangGraph agent and tools
+│   │   ├── agent.py              # Main chatbot agent
+│   │   ├── tools.py              # Parking tools
+│   │   ├── admin_agent.py        # 🆕 Administrator agent
+│   │   ├── channels.py           # 🆕 Communication channel handlers
+│   │   └── escalation.py         # 🆕 Escalation manager
+│   ├── api/              # 🆕 REST API server
+│   │   └── server.py             # FastAPI endpoints
 │   └── evaluation/       # Metrics and performance testing
 ├── tests/                # Comprehensive test suite
+│   └── test_admin_system.py      # 🆕 Admin system tests
 ├── data/                 # Knowledge base and database
 ├── docs/                 # Documentation and presentations
 ├── .github/workflows/    # CI/CD pipeline
 ├── main.py               # CLI entry point
+├── admin_cli.py          # 🆕 Administrator CLI
 ├── requirements.txt      # Python dependencies
 └── README.md            # This file
 ```
@@ -150,6 +185,47 @@ python main.py
 - `clear` - Clear conversation history
 - `quit` - Exit the chatbot
 
+### 🆕 Administrator Console
+
+Manage reservation approvals through the administrator CLI:
+
+```bash
+# Start the administrator console
+python admin_cli.py
+```
+
+#### Admin Commands
+
+```
+🔧 admin> list              # List all pending reservations
+🔧 admin> details <id>      # Get reservation details
+🔧 admin> approve <id>      # Approve a reservation
+🔧 admin> reject <id>       # Reject a reservation
+🔧 admin> stats             # Show statistics
+🔧 admin> cleanup           # Clean up expired requests
+🔧 admin> help              # Show help
+🔧 admin> quit              # Exit
+```
+
+#### REST API Server
+
+For webhook integrations and programmatic access:
+
+```bash
+# Start the API server
+python -m src.api.server
+```
+
+The API server provides:
+- `POST /webhook/reservation` - Receive reservation notifications
+- `POST /api/admin/respond` - Handle admin approval/rejection
+- `GET /api/reservations/{id}` - Get reservation details
+- `GET /api/reservations` - List pending reservations
+- `GET /api/stats` - Get statistics
+- `POST /api/cleanup` - Clean up expired reservations
+
+API documentation: `http://localhost:8000/docs`
+
 ## API Reference
 
 ### Core Components
@@ -178,6 +254,72 @@ from src.guards.railguard import get_guardrail_handler
 
 guards = get_guardrail_handler()
 processed_input, error = guards.process_input(user_input)
+```
+
+### 🆕 Stage 2: Administrator System
+
+#### ReservationManager
+```python
+from src.data.reservation_manager import get_reservation_manager
+
+manager = get_reservation_manager()
+
+# Create a reservation request
+request = manager.create_reservation_request(
+    user_name="John",
+    user_surname="Doe",
+    car_number="ABC-123",
+    start_time=datetime(2026, 4, 10, 10, 0),
+    end_time=datetime(2026, 4, 10, 12, 0),
+    space_type="standard",
+    contact_info="john@example.com",
+)
+
+# Approve reservation
+manager.approve_reservation(request.reservation_id, admin_note="Approved!")
+
+# Get pending reservations
+pending = manager.get_pending_reservations()
+```
+
+#### EscalationManager
+```python
+from src.chatbot.escalation import get_escalation_manager
+
+escalation = get_escalation_manager()
+
+# Submit reservation to admin
+result = escalation.escalate_reservation(
+    user_name="John",
+    user_surname="Doe",
+    car_number="ABC-123",
+    start_time=datetime(2026, 4, 10, 10, 0),
+    end_time=datetime(2026, 4, 10, 12, 0),
+    space_type="standard",
+    contact_info="john@example.com",
+)
+
+# Check status
+status = escalation.check_reservation_status(result["reservation_id"])
+```
+
+#### AdminAgent
+```python
+from src.chatbot.admin_agent import get_admin_agent
+
+admin = get_admin_agent()
+
+# List pending reservations
+response = admin.process_message("list")
+
+# Approve a reservation
+response = admin.process_message("approve abc-123 Looks good!")
+
+# Reject a reservation
+response = admin.process_message("reject abc-123 Space unavailable")
+
+# Get statistics
+response = admin.process_message("stats")
 ```
 
 ## Testing
@@ -236,6 +378,14 @@ python -m src.evaluation.performance
 | `DEFAULT_MODEL` | LLM model | deepseek-chat |
 | `TEMPERATURE` | LLM temperature | 0.7 |
 | `DATABASE_URL` | SQLite database path | sqlite:///./data/parking.db |
+| **Admin System** | | |
+| `ADMIN_EMAIL` | Administrator email address | admin@example.com |
+| `SMTP_SERVER` | SMTP server for email notifications | smtp.gmail.com |
+| `SMTP_PORT` | SMTP port | 587 |
+| `SMTP_USERNAME` | SMTP username | - |
+| `SMTP_PASSWORD` | SMTP password | - |
+| `ADMIN_API_ENDPOINT` | Webhook endpoint for REST API | - |
+| `ADMIN_API_KEY` | API key for authentication | - |
 
 ### Customization
 

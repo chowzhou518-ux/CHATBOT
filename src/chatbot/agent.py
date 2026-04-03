@@ -9,6 +9,7 @@ from src.core.rag_engine import RAGEngine, get_rag_engine
 from src.chatbot.tools import ParkingTools, ReservationDataCollector, get_parking_tools
 from src.guards.railguard import GuardRailHandler, get_guardrail_handler
 from src.config.settings import get_settings
+from src.chatbot.escalation import get_user_escalation_service
 
 
 class Intent(str, Enum):
@@ -151,9 +152,31 @@ class ParkingChatbotAgent:
             return message
 
         elif result["status"] == "complete":
-            # Collection complete, submit reservation
+            # Collection complete, escalate to administrator
             self.in_reservation_flow = False
-            return result["message"]
+
+            # Get collected data
+            reservation_data = result.get("reservation_data", {})
+            if not reservation_data:
+                # Fallback to collector's data
+                reservation_data = self.reservation_collector.get_collected_data()
+
+            # Use escalation service to submit to admin
+            escalation_service = get_user_escalation_service()
+
+            try:
+                response = escalation_service.submit_reservation_request(
+                    user_name=reservation_data.get("name", ""),
+                    user_surname=reservation_data.get("surname", ""),
+                    car_number=reservation_data.get("car_number", ""),
+                    start_time=reservation_data.get("start_time", datetime.utcnow()),
+                    end_time=reservation_data.get("end_time", datetime.utcnow()),
+                    space_type=reservation_data.get("space_type", "standard"),
+                    contact_info=reservation_data.get("contact_info", ""),
+                )
+                return response
+            except Exception as e:
+                return f"Sorry, there was an error submitting your reservation: {str(e)}"
 
         elif result["status"] == "error":
             # Error in validation, re-prompt for same field
@@ -246,6 +269,7 @@ class SimpleParkingChatbot:
         """Initialize simplified chatbot."""
         self.parking_tools = get_parking_tools()
         self.guardrails = get_guardrail_handler()
+        self.escalation_service = get_user_escalation_service()
         self.in_reservation_mode = False
         self.reservation_collector = ReservationDataCollector()
 
@@ -276,7 +300,24 @@ class SimpleParkingChatbot:
 
             if result["status"] == "complete":
                 self.in_reservation_mode = False
-                return result["message"]
+
+                # Escalate to administrator
+                reservation_data = result.get("reservation_data", {})
+                if not reservation_data:
+                    reservation_data = self.reservation_collector.get_collected_data()
+
+                try:
+                    return self.escalation_service.submit_reservation_request(
+                        user_name=reservation_data.get("name", ""),
+                        user_surname=reservation_data.get("surname", ""),
+                        car_number=reservation_data.get("car_number", ""),
+                        start_time=reservation_data.get("start_time", datetime.utcnow()),
+                        end_time=reservation_data.get("end_time", datetime.utcnow()),
+                        space_type=reservation_data.get("space_type", "standard"),
+                        contact_info=reservation_data.get("contact_info", ""),
+                    )
+                except Exception as e:
+                    return f"Sorry, there was an error submitting your reservation: {str(e)}"
             elif result["status"] == "error":
                 return f"Sorry, {result['error']}\n\n{self.reservation_collector.get_current_prompt()}"
             else:
