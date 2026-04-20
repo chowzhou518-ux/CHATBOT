@@ -10,7 +10,6 @@ anthropic>=0.18.0  # Optional: for Claude
 
 # Vector Database
 pymilvus>=2.3.0
-milvus>=2.3.0
 
 # Database
 sqlalchemy>=2.0.0

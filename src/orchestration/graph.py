@@ -96,6 +96,11 @@ class ParkingOrchestrator:
         # Memory checkpoint for conversation persistence
         self.memory = MemorySaver() if use_memory else None
 
+        # Maintain conversation state between messages
+        self.conversation_state = None
+        self.collector = None  # Persistent data collector
+        self.collection_step = 0
+
     def _build_workflow_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""
         # Create graph
@@ -179,6 +184,18 @@ class ParkingOrchestrator:
 
     def _classify_conversation_node(self, state: OrchestrationState) -> OrchestrationState:
         """Classify the type of conversation."""
+        # If we have an active collector, continue data collection
+        if self.collector is not None:
+            state["conversation_type"] = ConversationType.RESERVATION_REQUEST
+            print(f"📊 Continuing data collection (step {self.collection_step})")
+            return state
+
+        # If we're already in data collection stage, continue with that
+        if state.get("current_stage") == WorkflowStage.DATA_COLLECTION:
+            state["conversation_type"] = ConversationType.RESERVATION_REQUEST
+            print(f"📊 Continuing data collection (step {state.get('collection_step', 0)})")
+            return state
+
         state["current_stage"] = WorkflowStage.USER_INTERACTION
 
         user_input = state.get("user_input", "")
@@ -242,37 +259,44 @@ class ParkingOrchestrator:
         """Collect reservation data from user."""
         state["current_stage"] = WorkflowStage.DATA_COLLECTION
 
-        # Get reservation data collector
+        # Get or create reservation data collector (instance-level for persistence)
         from src.chatbot.tools import ReservationDataCollector
 
-        if "collector" not in state:
-            state["collector"] = ReservationDataCollector()
-            state["collection_step"] = 0
+        if self.collector is None:
+            self.collector = ReservationDataCollector()
+            self.collection_step = 0
+            # First time - ask for first name
+            state["bot_response"] = self.collector.get_current_prompt()
+            state["current_stage"] = WorkflowStage.DATA_COLLECTION
+            state["last_update"] = time.time()
+            return state
 
-        collector = state["collector"]
         user_input = state.get("user_input", "")
 
         # Process input
-        result = collector.process_input(user_input)
+        result = self.collector.process_input(user_input)
 
         if result["status"] == "collecting":
             state["bot_response"] = result["message"]
-            state["collection_step"] += 1
+            self.collection_step += 1
             # Stay in collection mode
             state["current_stage"] = WorkflowStage.DATA_COLLECTION
 
         elif result["status"] == "complete":
             # Collection complete, prepare for escalation
-            reservation_data = result.get("reservation_data", {})
-            if not reservation_data:
-                reservation_data = collector.get_collected_data()
+            reservation_data = self.collector.collected_data
 
             state["reservation_data"] = reservation_data
             state["bot_response"] = "Thank you! Your reservation request has been submitted for approval."
             state["current_stage"] = WorkflowStage.ADMIN_APPROVAL
 
+            # Reset collector for next reservation
+            self.collector = None
+            self.collection_step = 0
+
         elif result["status"] == "error":
-            state["bot_response"] = f"Sorry, {result['error']}\n\n{collector.get_current_prompt()}"
+            error_msg = result.get('message', 'Unknown error')
+            state["bot_response"] = f"Sorry, {error_msg}\n\n{self.collector.get_current_prompt()}"
             # Stay in collection mode
             state["current_stage"] = WorkflowStage.DATA_COLLECTION
 
@@ -506,30 +530,40 @@ Thank you for using our parking service!
         Returns:
             Dict with response and metadata
         """
-        # Initialize state
-        initial_state: OrchestrationState = {
-            "current_stage": WorkflowStage.INITIALIZATION,
-            "conversation_type": ConversationType.INFORMATION_QUERY,
-            "user_input": user_input,
-            "user_messages": [],
-            "bot_response": "",
-            "reservation_data": {},
-            "collection_step": 0,
-            "reservation_id": None,
-            "admin_decision": None,
-            "admin_note": None,
-            "recording_success": False,
-            "recording_error": None,
-            "start_time": time.time(),
-            "last_update": time.time(),
-            "error": None,
-            "guardrail_violations": 0,
-        }
+        # Initialize or continue state
+        if self.conversation_state is None:
+            # First message - create fresh state
+            initial_state: OrchestrationState = {
+                "current_stage": WorkflowStage.INITIALIZATION,
+                "conversation_type": ConversationType.INFORMATION_QUERY,
+                "user_input": user_input,
+                "user_messages": [],
+                "bot_response": "",
+                "reservation_data": {},
+                "collection_step": 0,
+                "reservation_id": None,
+                "admin_decision": None,
+                "admin_note": None,
+                "recording_success": False,
+                "recording_error": None,
+                "start_time": time.time(),
+                "last_update": time.time(),
+                "error": None,
+                "guardrail_violations": 0,
+            }
+        else:
+            # Continue existing conversation
+            initial_state = self.conversation_state.copy()
+            initial_state["user_input"] = user_input
+            initial_state["last_update"] = time.time()
 
         # Run workflow
         try:
             config = {"configurable": {"thread_id": "default"}}
             final_state = self.graph.invoke(initial_state, config)
+
+            # Save state for next message
+            self.conversation_state = final_state
 
             return {
                 "success": True,
@@ -569,6 +603,9 @@ Thank you for using our parking service!
 
                 if user_input.lower() == "clear":
                     self.rag_engine.clear_history()
+                    self.conversation_state = None  # Reset conversation state
+                    self.collector = None  # Reset data collector
+                    self.collection_step = 0
                     print("✓ Conversation history cleared\n")
                     continue
 

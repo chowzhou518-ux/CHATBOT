@@ -265,19 +265,66 @@ class ReservationDataCollector:
 
         elif step in ["start_time", "end_time"]:
             try:
-                # Try common date formats
-                for fmt in ["%Y-%m-%d %I:%M %p", "%Y-%m-%d %H:%M", "%m/%d/%Y %I:%M %p"]:
+                # Clean input - remove quotes if present
+                value = value.strip().strip('\'"')
+                value_lower = value.lower()
+
+                # Handle natural language inputs
+                parsed_time = None
+                now = datetime.now()
+
+                if value_lower in ["now", "right now", "today"]:
+                    parsed_time = now + timedelta(minutes=5)  # 5 minutes from now
+                elif value_lower == "tomorrow":
+                    parsed_time = now + timedelta(days=1)
+                    parsed_time = parsed_time.replace(hour=9, minute=0, second=0, microsecond=0)
+                elif "in " in value_lower:
+                    # Parse "in X hours/minutes"
                     try:
-                        parsed_time = datetime.strptime(value, fmt)
-                        # Ensure future date
-                        if parsed_time < datetime.now():
-                            return {"error": "Please provide a future date and time."}
-                        self.collected_data[step] = parsed_time
-                        break
-                    except ValueError:
-                        continue
-                else:
-                    return {"error": "Invalid date format. Please use format like '2026-03-25 10:00 AM'"}
+                        parts = value_lower.split()
+                        if len(parts) >= 3:
+                            amount = int(parts[1])
+                            unit = parts[2]
+
+                            if "hour" in unit:
+                                parsed_time = now + timedelta(hours=amount)
+                            elif "minute" in unit:
+                                parsed_time = now + timedelta(minutes=amount)
+                            elif "day" in unit:
+                                parsed_time = now + timedelta(days=amount)
+                                parsed_time = parsed_time.replace(hour=9, minute=0, second=0, microsecond=0)
+                    except (ValueError, IndexError):
+                        pass
+
+                # If not natural language, try date formats
+                if parsed_time is None:
+                    date_formats = [
+                        "%Y-%m-%d %I:%M %p",  # 2026-03-25 10:00 AM
+                        "%Y-%m-%d %I:%M%p",   # 2026-03-25 10:00AM (no space)
+                        "%Y-%m-%d %H:%M",     # 2026-03-25 10:00 (24-hour)
+                        "%m/%d/%Y %I:%M %p",  # 03/25/2026 10:00 AM
+                        "%m/%d/%Y %I:%M%p",   # 03/25/2026 10:00AM
+                        "%m/%d/%Y %H:%M",     # 03/25/2026 10:00
+                        "%Y-%m-%d at %I:%M %p",  # 2026-03-25 at 10:00 AM
+                        "%B %d, %Y %I:%M %p",    # March 25, 2026 10:00 AM
+                        "%b %d, %Y %I:%M %p",    # Mar 25, 2026 10:00 AM
+                    ]
+
+                    for fmt in date_formats:
+                        try:
+                            parsed_time = datetime.strptime(value, fmt)
+                            break
+                        except ValueError:
+                            continue
+
+                if parsed_time is None:
+                    return {"error": f"Invalid date format: '{value}'. Please use format like '2026-03-25 10:00 AM', '03/25/2026 10:00 AM', or 'in 2 hours'"}
+
+                # Ensure future date
+                if parsed_time < now:
+                    return {"error": "Please provide a future date and time."}
+
+                self.collected_data[step] = parsed_time
 
                 # Validate end time is after start time
                 if step == "end_time" and self.collected_data.get("start_time"):

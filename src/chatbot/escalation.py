@@ -14,7 +14,7 @@ class EscalationManager:
 
     def __init__(
         self,
-        default_channel: CommunicationChannel = CommunicationChannel.EMAIL,
+        default_channel: CommunicationChannel = CommunicationChannel.MOCK,
         admin_contact: Optional[str] = None,
         auto_escalate: bool = True,
     ):

@@ -28,6 +28,7 @@ class CommunicationChannel(str, Enum):
     REST_API = "rest_api"
     WEBHOOK = "webhook"
     SMS = "sms"
+    MOCK = "mock"  # For testing and development
 
 
 @dataclass
