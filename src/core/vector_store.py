@@ -268,15 +268,14 @@ class InMemoryVectorStore(VectorStore):
             self.documents = []
 
     def add_documents(self, documents: List[Dict[str, str]], batch_size: int = 100) -> int:
-        """Add documents to memory."""
+        """Add documents to memory (without pre-generating embeddings to save memory)."""
         for doc in documents:
             content = doc.get("content", "")
-            embedding = self.llm_handler.get_embedding(content)
-
+            # Don't pre-generate embeddings! Generate on search instead.
             self.documents.append({
                 "content": content,
                 "metadata": doc.get("metadata", {}),
-                "embedding": embedding,
+                "embedding": None,  # Will be generated on first search
             })
 
         return len(documents)
@@ -287,7 +286,7 @@ class InMemoryVectorStore(VectorStore):
         top_k: int = 5,
         output_fields: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Search using cosine similarity."""
+        """Search using cosine similarity with lazy embedding generation."""
         import numpy as np
         from sklearn.metrics.pairwise import cosine_similarity
 
@@ -297,9 +296,13 @@ class InMemoryVectorStore(VectorStore):
         # Get query embedding
         query_embedding = self.llm_handler.get_embedding(query)
 
-        # Calculate similarities
+        # Calculate similarities (generate embeddings on-the-fly if needed)
         similarities = []
         for doc in self.documents:
+            # Generate embedding if not cached
+            if doc["embedding"] is None:
+                doc["embedding"] = self.llm_handler.get_embedding(doc["content"])
+
             sim = cosine_similarity(
                 [query_embedding],
                 [doc["embedding"]],
@@ -325,17 +328,35 @@ class InMemoryVectorStore(VectorStore):
         """No disconnect needed."""
         pass
 
+    def get_collection_info(self) -> Dict[str, Any]:
+        """Get information about the in-memory collection."""
+        return {
+            "name": self.collection_name,
+            "description": "In-memory vector store",
+            "num_entities": len(self.documents),
+        }
+
+
+# Global cache for InMemoryVectorStore (singleton pattern)
+_in_memory_store_cache: Optional[InMemoryVectorStore] = None
+_in_memory_store_initialized = False
+
 
 def get_vector_store(use_in_memory: bool = False) -> VectorStore:
-    """Get vector store instance."""
+    """Get vector store instance (cached for in-memory store)."""
+    global _in_memory_store_cache, _in_memory_store_initialized
+
     if use_in_memory:
-        return InMemoryVectorStore()
+        # Use cached instance for InMemoryVectorStore
+        if _in_memory_store_cache is None:
+            _in_memory_store_cache = InMemoryVectorStore()
+        return _in_memory_store_cache
     return VectorStore()
 
 
 def initialize_vector_store(force_reload: bool = False) -> VectorStore:
     """
-    Initialize the vector store with sample data.
+    Initialize the vector store with sample data (without pre-generating embeddings).
 
     Args:
         force_reload: Whether to reload documents even if collection exists
@@ -343,23 +364,52 @@ def initialize_vector_store(force_reload: bool = False) -> VectorStore:
     Returns:
         Initialized vector store.
     """
+    global _in_memory_store_initialized
+
     from src.data.static_data import get_static_loader
 
-    store = get_vector_store(use_in_memory=True)  # Use in-memory for demo
+    store = get_vector_store(use_in_memory=True)
 
     # Only initialize if empty or force reload
-    info = store.get_collection_info()
-    if not force_reload and info.get("num_entities", 0) > 0:
+    if not force_reload and _in_memory_store_initialized:
         return store
 
     # Create collection
     store.create_collection(overwrite=True)
 
-    # Load and add documents
+    # Load and add documents (embeddings will be generated on search)
     loader = get_static_loader()
-    documents = loader.load_documents()
+    all_documents = loader.load_documents()
 
-    count = store.add_documents(documents)
-    print(f"Initialized vector store with {count} documents")
+    # 🔑 Only load the most critical documents to save memory
+    # Priority: pricing, hours, location, booking process
+    critical_sections = [
+        "价格费率", "Pricing",
+        "营业时间", "Working Hours",
+        "位置", "Location",
+        "预订和预订流程", "Booking and Reservation Process",
+        "车位可用性", "Space Availability",
+    ]
+
+    documents = []
+    for doc in all_documents:
+        metadata = doc.get("metadata", {})
+        section = metadata.get("section", "")
+
+        # Only include critical sections
+        if any(cs in section for cs in critical_sections):
+            documents.append(doc)
+
+    # Add documents WITHOUT pre-generating embeddings
+    for doc in documents:
+        content = doc.get("content", "")
+        store.documents.append({
+            "content": content,
+            "metadata": doc.get("metadata", {}),
+            "embedding": None,  # Will be generated on search
+        })
+
+    _in_memory_store_initialized = True
+    print(f"✅ Initialized vector store with {len(documents)} critical documents (embeddings generated on search)")
 
     return store

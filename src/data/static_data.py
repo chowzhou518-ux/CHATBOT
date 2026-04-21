@@ -1,16 +1,29 @@
 """Static data loading and processing for vector database."""
 
 import os
-from typing import List, Dict
+from typing import List, Dict, Optional
 from pathlib import Path
 
 
 class StaticDataLoader:
     """Loader for static parking knowledge base."""
 
-    def __init__(self, knowledge_base_path: str = "data/knowledge_base.md"):
-        """Initialize the static data loader."""
+    def __init__(self, knowledge_base_path: Optional[str] = None, language: str = "cn"):
+        """Initialize the static data loader.
+
+        Args:
+            knowledge_base_path: Path to knowledge base file (auto-detected if None)
+            language: Knowledge base language ("cn" or "en")
+        """
+        if knowledge_base_path is None:
+            # Auto-detect based on language
+            if language == "cn":
+                knowledge_base_path = "data/knowledge_base_cn.md"
+            else:
+                knowledge_base_path = "data/knowledge_base.md"
+
         self.knowledge_base_path = Path(knowledge_base_path)
+        self.language = language
 
     def load_markdown(self) -> str:
         """Load the markdown knowledge base."""
@@ -174,6 +187,15 @@ class StaticDataLoader:
         """
 
 
-def get_static_loader() -> StaticDataLoader:
-    """Get the static data loader instance."""
-    return StaticDataLoader()
+def get_static_loader(language: Optional[str] = None) -> StaticDataLoader:
+    """Get the static data loader instance.
+
+    Args:
+        language: Knowledge base language ("cn" or "en"). If None, reads from settings.
+    """
+    if language is None:
+        from src.config.settings import get_settings
+        settings = get_settings()
+        language = settings.knowledge_base_language
+
+    return StaticDataLoader(language=language)

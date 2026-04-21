@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="deepseek", description="LLM provider (deepseek, anthropic, openai)")
     llm_base_url: str = Field(default="https://api.deepseek.com", description="LLM API base URL")
 
+    # OpenAI API (for Embeddings)
+    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key for embeddings")
+
     # Milvus Configuration
     milvus_host: str = Field(default="localhost", description="Milvus server host")
     milvus_port: int = Field(default=19530, description="Milvus server port")
@@ -45,6 +48,7 @@ class Settings(BaseSettings):
     # Application
     log_level: str = Field(default="INFO", description="Logging level")
     max_context_length: int = Field(default=10, ge=1, description="Max conversation history")
+    knowledge_base_language: str = Field(default="cn", description="Knowledge base language (cn, en)")
 
     @property
     def milvus_uri(self) -> str:

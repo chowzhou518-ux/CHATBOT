@@ -39,6 +39,10 @@ class LLMHandler:
         self.provider = provider or settings.llm_provider
         self.base_url = base_url or settings.llm_base_url
 
+        # Initialize embedding model cache
+        self._embedding_model = None
+        self._embedding_model_name = None
+
         # Configure based on provider
         if self.provider == "deepseek":
             self.api_key = api_key or settings.deepseek_api_key
@@ -295,25 +299,153 @@ class LLMHandler:
 
     def get_embedding(self, text: str) -> List[float]:
         """
-        Get embedding for text (using a simple hash-based approach for demo).
-        In production, use an actual embedding service.
+        Get embedding for text using the configured embedding model.
+
+        Supports:
+        - sentence-transformers models (local, free)
+        - OpenAI embeddings (requires API key)
+        - DeepSeek embeddings (if available)
+        - Fallback to hash-based embedding (for demo)
 
         Args:
             text: Text to embed
 
         Returns:
-            Embedding vector.
+            Embedding vector (384-dimensional).
         """
-        # Note: This is a placeholder. In production, use an actual embedding service
-        # like DeepSeek embeddings, OpenAI embeddings, or a local model.
+        settings = get_settings()
+        model_name = settings.embedding_model
+
+        # Try different embedding strategies
+        try:
+            # Strategy 1: Sentence Transformers (local, free)
+            if model_name.startswith("sentence-transformers/"):
+                return self._get_sentence_transformer_embedding(text, model_name)
+
+            # Strategy 2: OpenAI Embeddings
+            elif model_name.startswith("text-embedding-"):
+                return self._get_openai_embedding(text, model_name)
+
+            # Strategy 3: DeepSeek Embeddings (if supported)
+            elif model_name == "deepseek":
+                return self._get_deepseek_embedding(text)
+
+            # Strategy 4: Fallback to hash-based
+            else:
+                print(f"⚠️  Unknown embedding model: {model_name}, using hash-based fallback")
+                return self._get_hash_embedding(text)
+
+        except Exception as e:
+            print(f"⚠️  Error generating embedding with {model_name}: {e}")
+            print("   Falling back to hash-based embedding")
+            return self._get_hash_embedding(text)
+
+    def _get_sentence_transformer_embedding(self, text: str, model_name: str) -> List[float]:
+        """Generate embedding using Sentence Transformers (local, free) with caching."""
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            # Extract model name (remove "sentence-transformers/" prefix)
+            model_path = model_name.replace("sentence-transformers/", "")
+
+            # Check cache (only load model once)
+            if self._embedding_model is None or self._embedding_model_name != model_path:
+                print(f"🔄 Loading Sentence Transformer model: {model_path}")
+                self._embedding_model = SentenceTransformer(model_path)
+                self._embedding_model_name = model_path
+                print(f"✅ Model loaded and cached")
+            else:
+                # Model already cached
+                pass
+
+            # Generate embedding
+            embedding = self._embedding_model.encode(text)
+
+            # Ensure 384 dimensions
+            if len(embedding) < 384:
+                # Pad with zeros
+                embedding = list(embedding) + [0.0] * (384 - len(embedding))
+            elif len(embedding) > 384:
+                # Truncate
+                embedding = list(embedding[:384])
+
+            return list(embedding)
+
+        except ImportError:
+            raise ImportError(
+                "sentence-transformers package is required. "
+                "Install: pip install sentence-transformers"
+            )
+        except Exception as e:
+            raise Exception(f"Sentence Transformer error: {e}")
+
+    def _get_openai_embedding(self, text: str, model_name: str) -> List[float]:
+        """Generate embedding using OpenAI API."""
+        try:
+            from openai import OpenAI
+
+            api_key = getattr(get_settings(), 'openai_api_key', None)
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY not set in environment variables")
+
+            client = OpenAI(api_key=api_key)
+
+            response = client.embeddings.create(
+                model=model_name,
+                input=text
+            )
+
+            embedding = response.data[0].embedding
+
+            # Ensure 384 dimensions
+            if len(embedding) < 384:
+                embedding = embedding + [0.0] * (384 - len(embedding))
+            elif len(embedding) > 384:
+                embedding = embedding[:384]
+
+            return embedding
+
+        except ImportError:
+            raise ImportError("openai package is required. Install: pip install openai")
+        except Exception as e:
+            raise Exception(f"OpenAI Embedding error: {e}")
+
+    def _get_deepseek_embedding(self, text: str) -> List[float]:
+        """Generate embedding using DeepSeek API (if supported)."""
+        try:
+            # Try to use DeepSeek's embeddings endpoint
+            response = self.client.embeddings.create(
+                model=self.model,
+                input=text,
+                encoding_format="float"
+            )
+
+            embedding = response.data[0].embedding
+
+            # Ensure 384 dimensions
+            if len(embedding) < 384:
+                embedding = embedding + [0.0] * (384 - len(embedding))
+            elif len(embedding) > 384:
+                embedding = embedding[:384]
+
+            return embedding
+
+        except Exception as e:
+            raise Exception(f"DeepSeek Embedding error (may not be supported): {e}")
+
+    def _get_hash_embedding(self, text: str) -> List[float]:
+        """
+        Generate a hash-based embedding (fallback for demo/testing).
+        Note: This is NOT a semantic embedding!
+        """
         import hashlib
         import struct
 
-        # Create a simple hash-based embedding (for demo purposes)
+        # Create a simple hash-based embedding
         hash_obj = hashlib.sha256(text.encode())
         hash_bytes = hash_obj.digest()
 
-        # Convert to 384-dimensional vector (matching sentence-transformers default)
+        # Convert to 384-dimensional vector
         embedding = []
         for i in range(384):
             byte_index = i % len(hash_bytes)

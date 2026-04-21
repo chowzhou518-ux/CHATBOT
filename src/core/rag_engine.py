@@ -89,6 +89,13 @@ Base your answers on the provided context, but speak naturally to the user."""
         """
         start_time = time.time()
 
+        # Lazy initialization: initialize vector store on first query
+        if hasattr(self.vector_store, 'documents') and len(self.vector_store.documents) == 0:
+            print("🔄 Initializing vector store on first query...")
+            from src.core.vector_store import initialize_vector_store
+            initialize_vector_store()
+            print("✅ Vector store ready")
+
         # Add user query to history
         self.conversation_history.add_message("user", user_query)
 
@@ -289,6 +296,8 @@ class MockRAGEngine(RAGEngine):
 
 def get_rag_engine(use_mock: bool = False) -> RAGEngine:
     """Get RAG engine instance."""
+    # Note: Vector store will be initialized lazily on first query
+    # to avoid memory issues during startup
     if use_mock:
         return MockRAGEngine()
     return RAGEngine()
