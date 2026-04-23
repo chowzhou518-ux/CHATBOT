@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from src.data.dynamic_data import get_db_manager
 from src.data.schemas import ParkingSpace, Availability, PricingInfo
 from src.data.static_data import get_static_loader
+from src.data.reservation_manager import get_reservation_manager
+from src.data.reservation_state import CommunicationChannel
 
 
 class ParkingTools:
@@ -28,19 +30,33 @@ class ParkingTools:
         """
         content = self.static_loader.load_markdown()
 
+        # Keyword mapping for common topics
+        keyword_mapping = {
+            "pricing": ["价格", "费率", "pricing", "rates"],
+            "hours": ["营业时间", "hours", "working hours", "open"],
+            "location": ["位置", "location", "address", "where"],
+            "rules": ["规则", "rules", "policy", "regulations"],
+            "payment": ["支付", "payment", "pay"],
+            "booking": ["预订", "booking", "reservation"],
+            "availability": ["可用", "availability", "space"],
+        }
+
+        # Get keywords for the topic
+        keywords = keyword_mapping.get(topic.lower(), [topic.lower()])
+
         # Simple section extraction
         lines = content.split("\n")
         result_lines = []
         in_section = False
 
-        topic_lower = topic.lower()
-
         for i, line in enumerate(lines):
-            if line.startswith(f"## ") and topic_lower in line.lower():
-                in_section = True
-                continue
-            elif line.startswith("## "):
-                if in_section:
+            # Check if this is a section header matching any keyword
+            if line.startswith("## "):
+                line_lower = line.lower()
+                if any(keyword in line_lower for keyword in keywords):
+                    in_section = True
+                    continue
+                elif in_section:
                     break
             elif in_section:
                 result_lines.append(line)
@@ -50,7 +66,8 @@ class ParkingTools:
 
         # Fallback to keyword search
         for i, line in enumerate(lines):
-            if topic_lower in line.lower():
+            line_lower = line.lower()
+            if any(keyword in line_lower for keyword in keywords):
                 context_start = max(0, i - 1)
                 context_end = min(len(lines), i + 10)
                 return "\n".join(lines[context_start:context_end])
@@ -173,8 +190,10 @@ class ParkingTools:
 class ReservationDataCollector:
     """Collects reservation data from users interactively."""
 
-    def __init__(self):
+    def __init__(self, db_manager=None, reservation_manager=None):
         """Initialize reservation data collector."""
+        self.db_manager = db_manager or get_db_manager()
+        self.reservation_manager = reservation_manager or get_reservation_manager()
         self.reset()
 
     def reset(self) -> None:
@@ -215,7 +234,12 @@ class ReservationDataCollector:
             Dict with 'status' ('collecting', 'complete', 'error') and 'message'.
         """
         if self.current_step >= len(self.steps):
-            return {"status": "complete", "message": self._get_summary()}
+            # Submit the reservation
+            reservation_id = self.submit_reservation()
+            if reservation_id:
+                return {"status": "complete", "message": self._get_summary(), "reservation_id": reservation_id}
+            else:
+                return {"status": "error", "message": "Failed to submit reservation. Please try again."}
 
         step = self.steps[self.current_step]
         result = self._validate_and_store(step, user_input)
@@ -227,7 +251,12 @@ class ReservationDataCollector:
         self.current_step += 1
 
         if self.current_step >= len(self.steps):
-            return {"status": "complete", "message": self._get_summary()}
+            # Submit the reservation
+            reservation_id = self.submit_reservation()
+            if reservation_id:
+                return {"status": "complete", "message": self._get_summary(), "reservation_id": reservation_id}
+            else:
+                return {"status": "error", "message": "Failed to submit reservation. Please try again."}
 
         return {
             "status": "collecting",
@@ -362,6 +391,10 @@ class ReservationDataCollector:
 
         return " | ".join(collected) if collected else "No data collected yet."
 
+    def get_collected_data(self) -> Dict[str, Any]:
+        """Get all collected reservation data."""
+        return self.collected_data.copy()
+
     def _get_summary(self) -> str:
         """Get complete summary for confirmation."""
         summary = (
@@ -373,12 +406,13 @@ class ReservationDataCollector:
             f"  End: {self.collected_data['end_time'].strftime('%Y-%m-%d %I:%M %p')}\n"
             f"  Contact: {'Provided' if (self.collected_data['email'] or self.collected_data['phone']) else 'Not provided'}\n\n"
             f"Your reservation has been submitted and is pending confirmation from our staff. "
-            f"You will receive a confirmation email or call shortly."
+            f"You will receive a confirmation email or call shortly.\n"
+            f"Reservation ID: {self.reservation_id if hasattr(self, 'reservation_id') else 'Processing...'}"
         )
         return summary
 
     def submit_reservation(self) -> Optional[str]:
-        """Submit the reservation to the database."""
+        """Submit the reservation to the database using ReservationManager."""
         if not all([
             self.collected_data["name"],
             self.collected_data["surname"],
@@ -389,18 +423,41 @@ class ReservationDataCollector:
         ]):
             return None
 
-        reservation_id = self.db_manager.create_reservation(
-            name=self.collected_data["name"],
-            surname=self.collected_data["surname"],
-            car_number=self.collected_data["car_number"],
-            space_type=self.collected_data["space_type"],
-            start_time=self.collected_data["start_time"],
-            end_time=self.collected_data["end_time"],
-            email=self.collected_data.get("email"),
-            phone=self.collected_data.get("phone"),
-        )
+        try:
+            # Determine contact info and channel
+            contact_info = ""
+            comm_channel = CommunicationChannel.EMAIL
 
-        return reservation_id
+            if self.collected_data.get("email"):
+                contact_info = self.collected_data["email"]
+                comm_channel = CommunicationChannel.EMAIL
+            elif self.collected_data.get("phone"):
+                contact_info = self.collected_data["phone"]
+                comm_channel = CommunicationChannel.SMS
+
+            # Create reservation using ReservationManager (for admin approval)
+            request = self.reservation_manager.create_reservation_request(
+                user_name=self.collected_data["name"],
+                user_surname=self.collected_data["surname"],
+                car_number=self.collected_data["car_number"],
+                start_time=self.collected_data["start_time"],
+                end_time=self.collected_data["end_time"],
+                space_type=self.collected_data["space_type"],
+                contact_info=contact_info,
+                communication_channel=comm_channel,
+            )
+
+            # Extract the ID string from the ReservationRequest object
+            reservation_id = request.reservation_id
+            self.reservation_id = reservation_id
+            print(f"✅ Reservation created with ID: {reservation_id}")
+            print(f"📧 Submitted to admin for approval")
+            return reservation_id
+        except Exception as e:
+            print(f"❌ Error creating reservation: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
 
 # Global instances

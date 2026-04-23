@@ -140,10 +140,19 @@ Please provide a helpful answer based on the information above.""")
         ])
 
         # Create LLM callable for LangChain
-        def llm_callable(inputs):
-            prompt_text = inputs.get("prompt", "")
-            if isinstance(prompt_text, list):
-                prompt_text = "\n".join([str(p) for p in prompt_text])
+        def llm_callable(prompt_value):
+            """Convert prompt value to string and call LLM."""
+            # Handle ChatPromptValue or string
+            if hasattr(prompt_value, 'to_string'):
+                prompt_text = prompt_value.to_string()
+            elif hasattr(prompt_value, 'messages'):
+                # Extract text from ChatPromptValue
+                messages = prompt_value.messages
+                prompt_text = "\n".join([msg.content for msg in messages])
+            elif isinstance(prompt_value, str):
+                prompt_text = prompt_value
+            else:
+                prompt_text = str(prompt_value)
 
             return self.llm_handler.generate_response(
                 prompt=prompt_text,
@@ -157,6 +166,7 @@ Please provide a helpful answer based on the information above.""")
                 "input": RunnablePassthrough()
             }
             | self.prompt
+            | RunnableLambda(llm_callable)
             | StrOutputParser()
         )
 
@@ -233,19 +243,16 @@ Please provide a helpful answer based on the information above.""")
         self._build_chain()  # Rebuild chain with new prompt
 
 
-class CustomRetriever(BaseRetriever):
-    """Custom retriever that wraps our vector store."""
+class CustomRetriever:
+    """Simple custom retriever that wraps our vector store without LangChain BaseRetriever."""
 
-    vector_store: Any
-    top_k: int = 3
+    def __init__(self, vector_store: Any, top_k: int = 3):
+        """Initialize the retriever."""
+        self.vector_store = vector_store
+        self.top_k = top_k
 
-    def _get_relevant_documents(
-        self,
-        query: str,
-        *,
-        run_manager: Any = None,
-    ) -> List[Document]:
-        """Retrieve relevant documents."""
+    def get_relevant_documents(self, query: str) -> List[Document]:
+        """Retrieve relevant documents (public method for LangChain compatibility)."""
         results = self.vector_store.search(query=query, top_k=self.top_k)
 
         documents = []
@@ -257,6 +264,10 @@ class CustomRetriever(BaseRetriever):
             documents.append(doc)
 
         return documents
+
+    def __call__(self, query: str) -> List[Document]:
+        """Allow callable interface for LangChain."""
+        return self.get_relevant_documents(query)
 
 
 def get_rag_engine(use_mock: bool = False) -> RAGEngine:

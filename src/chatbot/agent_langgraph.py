@@ -49,7 +49,8 @@ class LangGraphParkingAgent:
         self.parking_tools = parking_tools or get_parking_tools()
         self.guardrails = guardrail_handler or get_guardrail_handler()
 
-        self.reservation_collector = ReservationDataCollector()
+        # Pass db_manager to the reservation collector
+        self.reservation_collector = ReservationDataCollector(db_manager=self.parking_tools.db_manager)
         self.in_reservation_flow = False
 
         # Build LangGraph
@@ -321,7 +322,7 @@ class SimpleParkingChatbot:
         self.parking_tools = get_parking_tools()
         self.guardrails = get_guardrail_handler()
         self.in_reservation_mode = False
-        self.reservation_collector = ReservationDataCollector()
+        self.reservation_collector = ReservationDataCollector(db_manager=self.parking_tools.db_manager)
 
     def chat(self, user_input: str) -> str:
         """
@@ -410,3 +411,7 @@ def get_chatbot_agent() -> LangGraphParkingAgent:
 def get_simple_chatbot() -> SimpleParkingChatbot:
     """Get simple chatbot instance."""
     return SimpleParkingChatbot()
+
+
+# Alias for compatibility with main.py
+get_langgraph_agent = get_chatbot_agent
