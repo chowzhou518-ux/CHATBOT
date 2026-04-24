@@ -203,7 +203,7 @@ class EscalationManager:
             Dictionary with result
         """
         try:
-            from src.chatbot.admin_agent import get_admin_agent
+            from src.chatbot.admin_agent_final import get_admin_agent
 
             admin_agent = get_admin_agent()
             result = admin_agent.handle_admin_response(response)

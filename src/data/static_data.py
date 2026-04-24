@@ -4,11 +4,25 @@ import os
 from typing import List, Dict, Optional
 from pathlib import Path
 
+# LangChain imports for text splitting
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from langchain_core.documents import Document
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    try:
+        # Fallback to old import paths
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        from langchain.schema import Document
+        LANGCHAIN_AVAILABLE = True
+    except ImportError:
+        LANGCHAIN_AVAILABLE = False
+
 
 class StaticDataLoader:
     """Loader for static parking knowledge base."""
 
-    def __init__(self, knowledge_base_path: Optional[str] = None, language: str = "cn"):
+    def __init__(self, knowledge_base_path: Optional[str] = None, language: str = "en"):
         """Initialize the static data loader.
 
         Args:
@@ -73,6 +87,115 @@ class StaticDataLoader:
             })
 
         return documents
+
+    def load_documents_with_chunking(
+        self,
+        chunk_size: int = 500,
+        chunk_overlap: int = 50,
+        use_langchain: bool = True,
+    ) -> List[Dict[str, str]]:
+        """
+        Load and chunk documents using LangChain's text splitter.
+
+        Args:
+            chunk_size: Maximum size of each chunk (in characters)
+            chunk_overlap: Overlap between chunks
+            use_langchain: Whether to use LangChain's text splitter
+
+        Returns:
+            List of chunked documents with metadata.
+        """
+        # Load raw documents first
+        raw_documents = self.load_documents()
+
+        if not use_langchain or not LANGCHAIN_AVAILABLE:
+            print("⚠️  LangChain not available, using simple chunking")
+            return self._simple_chunking(raw_documents, chunk_size)
+
+        # Convert to LangChain Document format
+        documents = []
+        for doc in raw_documents:
+            documents.append(
+                Document(page_content=doc["content"], metadata=doc["metadata"])
+            )
+
+        # Use LangChain's RecursiveCharacterTextSplitter
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            separators=[
+                "\n\n",  # Paragraph breaks
+                "\n",    # Line breaks
+                "。",    # Chinese period
+                ". ",    # English period
+                "！",    # Chinese exclamation
+                "! ",    # English exclamation
+                "？",    # Chinese question mark
+                "? ",    # English question mark
+                "；",    # Chinese semicolon
+                "; ",    # English semicolon
+                "，",    # Chinese comma
+                ", ",    # English comma
+                " ",     # Spaces
+                ""       # Individual characters
+            ],
+            length_function=len,
+        )
+
+        # Split documents
+        chunks = text_splitter.split_documents(documents)
+
+        # Convert back to dict format
+        chunked_documents = []
+        for i, chunk in enumerate(chunks):
+            chunked_documents.append({
+                "content": chunk.page_content,
+                "metadata": {
+                    **chunk.metadata,
+                    "chunk_id": f"{chunk.metadata.get('section', 'general')}_{i}",
+                    "chunk_size": len(chunk.page_content),
+                }
+            })
+
+        print(f"✅ Chunked {len(documents)} documents into {len(chunks)} chunks")
+        print(f"   Average chunk size: {sum(len(c['content']) for c in chunked_documents) / len(chunked_documents):.0f} chars")
+
+        return chunked_documents
+
+    def _simple_chunking(
+        self,
+        documents: List[Dict[str, str]],
+        chunk_size: int = 500,
+    ) -> List[Dict[str, str]]:
+        """
+        Simple chunking fallback (by character count).
+
+        Args:
+            documents: List of documents
+            chunk_size: Maximum chunk size
+
+        Returns:
+            List of chunked documents.
+        """
+        chunks = []
+
+        for doc in documents:
+            content = doc["content"]
+            metadata = doc["metadata"]
+
+            # Split by character count
+            for i in range(0, len(content), chunk_size):
+                chunk_content = content[i:i + chunk_size]
+                chunks.append({
+                    "content": chunk_content,
+                    "metadata": {
+                        **metadata,
+                        "chunk_id": f"{metadata.get('section', 'general')}_{i // chunk_size}",
+                        "chunk_size": len(chunk_content),
+                    }
+                })
+
+        return chunks
 
     def get_faq_pairs(self) -> List[Dict[str, str]]:
         """

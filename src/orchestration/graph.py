@@ -15,12 +15,12 @@ from enum import Enum
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
-from src.core.rag_engine import RAGEngine, get_rag_engine
+from src.core.rag_engine_standard import StandardRAGEngine as RAGEngine, get_standard_rag_engine as get_rag_engine
 from src.chatbot.tools import get_parking_tools
 from src.guards.railguard import GuardRailHandler, get_guardrail_handler
 from src.chatbot.escalation import get_escalation_manager
 from src.data.reservation_manager import get_reservation_manager
-from src.chatbot.admin_agent import get_admin_agent
+from src.chatbot.admin_agent_final import get_admin_agent
 
 
 class WorkflowStage(str, Enum):
@@ -84,6 +84,13 @@ class ParkingOrchestrator:
         """Initialize the orchestrator."""
         # Initialize components
         self.rag_engine = rag_engine or get_rag_engine()
+        try:
+            self.rag_engine.initialize_with_chunking()
+            print("✅ RAG engine initialized with chunking and reranking")
+        except Exception as e:
+            print(f"⚠️  RAG engine initialization warning: {e}")
+            print("   Continuing with basic RAG functionality...")
+
         self.parking_tools = get_parking_tools()
         self.guardrails = get_guardrail_handler()
         self.escalation_manager = get_escalation_manager()
@@ -201,9 +208,16 @@ class ParkingOrchestrator:
         user_input = state.get("user_input", "")
         input_lower = user_input.lower()
 
-        # Check for admin commands
-        if any(word in input_lower for word in ["approve ", "reject ", "list", "stats", "details "]):
+        # Check for admin commands (more robust matching)
+        admin_commands = ["approve", "reject", "list", "stats", "details"]
+        is_admin_command = any(
+            input_lower.startswith(cmd + " ") or input_lower == cmd
+            for cmd in admin_commands
+        )
+
+        if is_admin_command:
             state["conversation_type"] = ConversationType.ADMIN_COMMAND
+            print(f"🔧 Admin command detected: {user_input}")
             # Handle admin command directly
             response = self.admin_agent.process_message(user_input)
             state["bot_response"] = response

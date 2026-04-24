@@ -8,7 +8,7 @@ from enum import Enum
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 
-from src.core.rag_engine_langchain import RAGEngine, get_rag_engine
+from src.core.rag_engine_standard import StandardRAGEngine as RAGEngine, get_standard_rag_engine as get_rag_engine
 from src.chatbot.tools import ParkingTools, ReservationDataCollector, get_parking_tools
 from src.guards.railguard import GuardRailHandler, get_guardrail_handler
 from src.config.settings import get_settings

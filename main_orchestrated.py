@@ -49,14 +49,15 @@ def run_simple_chatbot():
 
 
 def run_admin_console():
-    """Run the administrator console."""
-    from src.chatbot.admin_agent import get_admin_agent
+    """Run the administrator console with LangChain 1.0 agent."""
+    from src.chatbot.admin_agent_final import get_admin_agent
 
     admin_agent = get_admin_agent()
 
     print("\n" + "="*80)
-    print("🚗 PARKING RESERVATION ADMINISTRATOR CONSOLE")
+    print("🚗 PARKING RESERVATION ADMINISTRATOR CONSOLE (LangChain 1.0)")
     print("="*80)
+    print("\n🤖 Powered by LangChain 1.0 + LangGraph")
     print("\nAvailable Commands:")
     print("  list              - List all pending reservations")
     print("  details <id>      - Get details of a specific reservation")
